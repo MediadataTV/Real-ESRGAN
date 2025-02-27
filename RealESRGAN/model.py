@@ -36,16 +36,20 @@ class RealESRGAN:
             num_block=23, num_grow_ch=32, scale=scale
         )
         
-    def load_weights(self, model_path, download=True):
+    def load_weights(self, model_path, model_path_is_local=True, download=True):
         if not os.path.exists(model_path) and download:
             assert self.scale in [2,4,8], 'You can download models only with scales: 2, 4, 8'
             config = HF_MODELS[self.scale]
             cache_dir = os.path.dirname(model_path)
             local_filename = os.path.basename(model_path)
-
-            model_hf_path = hf_hub_download(
-                repo_id=config['repo_id'], filename=config['filename'], cache_dir=cache_dir, force_filename=local_filename
-            )
+            if model_path_is_local:
+                model_hf_path = hf_hub_download(
+                    repo_id=config['repo_id'], filename=config['filename'], local_dir=cache_dir
+                )
+            else:
+                model_hf_path = hf_hub_download(
+                    repo_id=config['repo_id'], filename=config['filename'], cache_dir=cache_dir
+                )
             print('Weights downloaded to:', model_hf_path)
           
         
@@ -59,7 +63,16 @@ class RealESRGAN:
         self.model.eval()
         self.model.to(self.device)
         
-    @torch.cuda.amp.autocast()
+    def _autocast_with_device(device_attr):
+        def decorator(func):
+            def wrapper(self, *args, **kwargs):
+                device = getattr(self, device_attr)
+                with torch.amp.autocast(device.type):
+                    return func(self, *args, **kwargs)
+            return wrapper
+        return decorator
+
+    @_autocast_with_device(device_attr='device')
     def predict(self, lr_image, batch_size=4, patches_size=192,
                 padding=24, pad_size=15):
         scale = self.scale
